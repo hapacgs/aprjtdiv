@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>A.P. (Periodical) Report Generator - RJT Division</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
     <style>
         :root { --primary: #2c3e50; --accent: #3498db; --light: #f4f7f6; }
         body { font-family: 'Segoe UI', sans-serif; background-color: var(--light); padding: 10px; }
@@ -16,14 +19,23 @@
         .controls { display: none; background: var(--primary); color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
         .station-wrapper { background: #34495e; padding: 10px; border-radius: 6px; display: inline-block; margin-bottom: 10px; }
         .station-label { font-weight: bold; color: #fff; margin-right: 10px; }
-        .report-title { text-align: center; color: var(--primary); margin-top: 20px; margin-bottom: 5px; }
+        .report-title { text-align: center; color: var(--primary); margin-top: 25px; margin-bottom: 5px; }
+        .station-heading { background: #e67e22; color: white; padding: 6px 15px; display: inline-block; border-radius: 4px; margin-top: 20px; font-weight: bold; }
         .period-display { text-align: center; font-weight: bold; color: #d35400; margin-bottom: 15px; border: 1px solid #d35400; display: inline-block; padding: 5px 15px; border-radius: 4px; }
-        .table-wrapper { width: 100%; overflow-x: auto; margin-top: 15px; }
+        .table-wrapper { width: 100%; overflow-x: auto; margin-top: 10px; margin-bottom: 30px; }
         table { width: 100%; border-collapse: collapse; min-width: 800px; }
         th { background: var(--accent); color: white; padding: 12px; font-size: 13px; }
         .sub-text { font-size: 10px; font-weight: normal; display: block; opacity: 0.9; }
         td { padding: 10px; border-bottom: 1px solid #ddd; text-align: center; font-size: 13px; }
         .total-row { background: #d6eaf8 !important; font-weight: bold; }
+        
+        /* Export Buttons Styling */
+        .export-btn-container { text-align: center; margin: 15px 0; display: none; gap: 10px; justify-content: center; }
+        .btn-export { color: white; border: none; padding: 10px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 14px; transition: 0.2s; }
+        .btn-pdf { background-color: #e74c3c; }
+        .btn-pdf:hover { background-color: #c0392b; }
+        .btn-excel { background-color: #27ae60; }
+        .btn-excel:hover { background-color: #219653; }
     </style>
 </head>
 <body>
@@ -35,7 +47,7 @@
     </div>
 
     <div id="uploadArea" class="upload-section">
-        <label style="display:block; padding:12px; background:#3498db; color:white; text-align:center; border-radius:6px;">
+         <label style="display:block; padding:12px; background:#3498db; color:white; text-align:center; border-radius:6px;">
         📂 Select CSV / Excel File
         <input type="file" id="csvFile" accept="*/*" style="display:none;">
         </label>
@@ -55,11 +67,17 @@
         <button onclick="location.reload()" style="background:#e74c3c; color:white; border:none; padding:8px 15px; border-radius:4px; cursor:pointer;">RESET</button>
     </div>
 
+    <div id="exportContainer" class="export-btn-container">
+        <button class="btn-export btn-pdf" onclick="exportToPDF()">📥 Export to PDF</button>
+        <button class="btn-export btn-excel" onclick="exportToExcel()">📊 Export to Excel</button>
+    </div>
+
     <div id="reportArea"></div>
 </div>
 
 <script>
     let finalData = [];
+    let stationList = [];
     const format = (num, isWeight = false) => isWeight ? parseFloat(num || 0).toFixed(2) : Math.round(num || 0);
 
     function getPeriodRange() {
@@ -78,8 +96,12 @@
             beforeFirstChunk: chunk => chunk.split('\n').slice(2).join('\n'),
             complete: (res) => {
                 finalData = res.data;
-                const stations = [...new Set(finalData.map(r => r['STATION FROM']))].filter(s => s && !s.toUpperCase().includes("TOTAL"));
-                document.getElementById('stationDropdown').innerHTML = stations.map(s => `<option value="${s}">${s}</option>`).join('');
+                stationList = [...new Set(finalData.map(r => r['STATION FROM']))].filter(s => s && !s.toUpperCase().includes("TOTAL"));
+                
+                let dropdownHTML = `<option value="ALL">ALL STATIONS</option>`;
+                dropdownHTML += stationList.map(s => `<option value="${s}">${s}</option>`).join('');
+                
+                document.getElementById('stationDropdown').innerHTML = dropdownHTML;
                 document.getElementById('uploadArea').style.display = "none";
                 document.getElementById('controls').style.display = "block";
                 runSelectedReport();
@@ -87,62 +109,69 @@
         });
     });
 
-    runSelectedReport() 
+    function runSelectedReport() {
+        const type = document.querySelector('input[name="report"]:checked').value;
+        const selStation = document.getElementById('stationDropdown').value;
+        const period = getPeriodRange();
 
-javascript
-function runSelectedReport() {
-    const type = document.querySelector('input[name="report"]:checked').value;
-    const selStation = document.getElementById('stationDropdown').value;
-    const period = getPeriodRange();
+        let title = "";
+        if (type === "SN105") title = "SN-105";
+        else if (type === "AP") title = "A.P. (PERIODICAL)";
+        else if (type === "OS") title = "OUTSTANDING";
+        else if (type === "VC") title = "VOUCHER C.R.";
 
-    let title = "";
+        // Export buttons visibility handling
+        if(selStation === "ALL") {
+            document.getElementById('exportContainer').style.display = "flex";
+        } else {
+            document.getElementById('exportContainer').style.display = "none";
+        }
 
-    if (type === "SN105") {
-        title = "SN-105";
-    }
-    else if (type === "AP") {
-        title = "A.P. (PERIODICAL)";
-    }
-    else if (type === "OS") {
-        title = "OUTSTANDING";
-    }
-    else if (type === "VC") {
-        title = "VOUCHER C.R.";
-    }
+        let reportHTML = `
+            <h3 class="report-title">
+                A STATEMENT SHOWING ${title} FOR ${selStation === "ALL" ? "ALL STATIONS" : selStation}
+            </h3>
+            <p style="text-align:center; margin-top:5px; margin-bottom:15px; font-weight:bold; color:#d35400;">
+                PERIOD : ${period}
+            </p>
+        `;
 
-    let reportHTML = `
-        <h3 class="report-title">
-            A STATEMENT SHOWING ${title} FOR ${selStation}
-        </h3>
+        if (selStation === "ALL") {
+            if (type === "SN105") {
+                stationList.forEach(stn => {
+                    reportHTML += `<div style="text-align:center;"><span class="station-heading">STATION: ${stn}</span></div>`;
+                    reportHTML += displaySN105(stn);
+                });
+            }
+            else if (type === "AP") {
+                stationList.forEach(stn => {
+                    reportHTML += `<div style="text-align:center;"><span class="station-heading">STATION: ${stn}</span></div>`;
+                    reportHTML += displayAPReport(stn);
+                });
+            }
+            else {
+                reportHTML += "<h3 class='report-title'>Work under progress...</h3>";
+            }
+        } 
+        else {
+            if (type === "SN105") {
+                reportHTML += displaySN105(selStation);
+            }
+            else if (type === "AP") {
+                reportHTML += displayAPReport(selStation);
+            }
+            else {
+                reportHTML += "<h3 class='report-title'>Work under progress...</h3>";
+            }
+        }
 
-        <p style="
-            text-align:center;
-            margin-top:5px;
-            margin-bottom:15px;
-            font-weight:bold;
-            color:#d35400;
-        ">
-            PERIOD : ${period}
-        </p>
-    `;
-
-    if (type === "SN105") {
-        document.getElementById('reportArea').innerHTML =
-            reportHTML + displaySN105(selStation);
+        document.getElementById('reportArea').innerHTML = reportHTML;
     }
-    else if (type === "AP") {
-        document.getElementById('reportArea').innerHTML =
-            reportHTML + displayAPReport(selStation);
-    }
-    else {
-        document.getElementById('reportArea').innerHTML =
-            reportHTML + "<h3 class='report-title'>Work under progress...</h3>";
-    }
-}
-
 
     function displaySN105(stn) {
         const filtered = finalData.filter(r => r['STATION FROM'] === stn);
+        if(filtered.length === 0) return `<p style="text-align:center; color:gray; font-style:italic;">No Data Available</p>`;
+        
         let groups = {}, gT = { wagons: 0, weight: 0, rrs: new Set() };
         filtered.forEach(r => {
             let cmdt = (r['CMDT CODE-CODE'] || 'N/A').split('-').slice(1).join('-').trim();
@@ -160,6 +189,8 @@ function runSelectedReport() {
 
     function displayAPReport(stn) {
         const filtered = finalData.filter(r => r['STATION FROM'] === stn);
+        if(filtered.length === 0) return `<p style="text-align:center; color:gray; font-style:italic;">No Data Available</p>`;
+
         let groups = {}, gT = { rrs: new Set(), wagons: 0, weight: 0, basic: 0, gst: 0, total: 0 };
         filtered.forEach(r => {
             let cmdt = (r['CMDT CODE-CODE'] || 'N/A').split('-').slice(1).join('-').trim();
@@ -175,6 +206,60 @@ function runSelectedReport() {
         });
         html += `<tr class="total-row"><td>TOTAL</td><td>${gT.rrs.size}</td><td>${gT.wagons}</td><td>${format(gT.weight, true)}</td><td>${format(gT.basic)}</td><td>${format(gT.gst)}</td><td>${format(gT.total)}</td></tr></table></div>`;
         return html;
+    }
+
+    // PDF Export Functionality
+    function exportToPDF() {
+        const element = document.getElementById('reportArea');
+        const type = document.querySelector('input[name="report"]:checked').value;
+        const opt = {
+            margin:       10,
+            filename:     `ALL_STATIONS_${type}_REPORT.pdf`,
+            image:        { type: 'jpeg', quality: 0.98 },
+            html2canvas:  { scale: 2 },
+            jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+        };
+        html2pdf().set(opt).from(element).save();
+    }
+
+    // Excel Export Functionality
+    function exportToExcel() {
+        const type = document.querySelector('input[name="report"]:checked').value;
+        const wb = XLSX.utils.book_new();
+        
+        // पूरे HTML एरिया से सभी टेबल्स निकाल कर एक साथ मर्ज करना
+        const tables = document.querySelectorAll('#reportArea table');
+        const headings = document.querySelectorAll('#reportArea .station-heading');
+        
+        let wsData = [];
+        
+        // टाइटल रो जोड़ना
+        wsData.push([`ALL STATIONS REPORT - ${type}`]);
+        wsData.push([`PERIOD : ${getPeriodRange()}`]);
+        wsData.push([]); // खाली लाइन
+
+        tables.forEach((table, index) => {
+            if(headings[index]) {
+                wsData.push([headings[index].innerText]); // स्टेशन का नाम रो
+            }
+            
+            const rows = table.querySelectorAll('tr');
+            rows.forEach(row => {
+                let rowData = [];
+                const cells = row.querySelectorAll('th, td');
+                cells.forEach(cell => {
+                    // सब-टेक्स्ट (जैसे Units, Tonnes) हटाकर सिर्फ प्योर टेक्स्ट लेना
+                    let text = cell.innerText.split('\n')[0];
+                    rowData.push(text);
+                });
+                wsData.push(rowData);
+            });
+            wsData.push([]); // हर स्टेशन की टेबल के बाद एक खाली लाइन गैप के लिए
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        XLSX.utils.book_append_sheet(wb, ws, "All Stations");
+        XLSX.writeFile(wb, `ALL_STATIONS_${type}_REPORT.xlsx`);
     }
 </script>
 </body>
