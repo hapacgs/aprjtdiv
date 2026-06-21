@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>A.P. Report Generator - RJT Division</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root { --primary: #2c3e50; --accent: #3498db; --light: #f4f7f6; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--light); color: #333; padding: 20px; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        
+        .header-section { text-align: center; margin-bottom: 30px; }
+        .header-section h2 { color: var(--primary); margin: 0; font-size: 28px; }
+        .header-section p { color: #7f8c8d; }
+
+        .upload-section { text-align: center; padding: 50px; border: 2px dashed var(--accent); border-radius: 10px; background: #ebf5fb; }
+        .controls { display: none; text-align: center; padding: 20px; background: var(--primary); color: white; border-radius: 8px; margin-bottom: 20px; }
+        
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; }
+        th { background: var(--accent); color: white; padding: 15px; font-size: 13px; text-transform: uppercase; }
+        th:first-child { border-radius: 8px 0 0 0; }
+        th:last-child { border-radius: 0 8px 0 0; }
+        td { padding: 12px; border-bottom: 1px solid #ddd; text-align: center; }
+        .commodity-cell { text-align: left; padding-left: 20px; color: var(--accent); font-weight: bold; }
+        .total-row { background: #d6eaf8 !important; font-weight: bold; color: var(--primary); }
+        tr:hover { background: #f1f1f1; }
+        
+        .reset-btn { background: #e74c3c; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-section">
+        <h2>A.P.(Periodical) Report Generator - RJT Division</h2>
+        <p>Designed & Developed by : Gaurang Thakker, CGS-HAPA</p>
+    </div>
+
+    <div id="uploadArea" class="upload-section">
+        <input type="file" id="csvFile" accept=".csv">
+    </div>
+    
+    <div id="controls" class="controls">
+        <label><b>Station:</b></label>
+        <select id="stationDropdown" onchange="runSelectedReport()" style="padding: 5px;"></select>
+        <span style="margin: 0 20px;">|</span>
+        <label><input type="radio" name="report" value="OS" onchange="runSelectedReport()"> Outstanding</label>
+        <label><input type="radio" name="report" value="SN105" checked onchange="runSelectedReport()"> SN-105</label>
+        <label><input type="radio" name="report" value="AP" onchange="runSelectedReport()"> A.P. (Periodical)</label>
+        <label><input type="radio" name="report" value="VC" onchange="runSelectedReport()"> Voucher C.R.</label>
+        <button class="reset-btn" onclick="location.reload()">RESET</button>
+    </div>
+
+    <div id="reportArea"></div>
+</div>
+
+<script>
+    let finalData = [];
+
+    // Helper: Round numbers as integer except weight
+    const format = (num, isWeight = false) => isWeight ? num.toFixed(2) : Math.round(num);
+
+    document.getElementById('csvFile').addEventListener('change', function(e) {
+        Papa.parse(e.target.files[0], {
+            header: true, skipEmptyLines: true,
+            beforeFirstChunk: chunk => chunk.split('\n').slice(2).join('\n'),
+            complete: (res) => {
+                finalData = res.data;
+                const stations = [...new Set(finalData.map(r => r['STATION FROM']))].filter(s => s && !s.toUpperCase().includes("TOTAL") && !s.toUpperCase().includes("GRAND"));
+                document.getElementById('stationDropdown').innerHTML = stations.map(s => `<option value="${s}">${s}</option>`).join('');
+                document.getElementById('uploadArea').style.display = "none";
+                document.getElementById('controls').style.display = "block";
+                runSelectedReport();
+            }
+        });
+    });
+
+    function runSelectedReport() {
+        const type = document.querySelector('input[name="report"]:checked').value;
+        type === "SN105" ? displaySN105() : (type === "AP" ? displayAPReport() : document.getElementById('reportArea').innerHTML = "<h3 style='text-align:center;'>Work under progress...</h3>");
+    }
+
+    function displaySN105() {
+        const selStation = document.getElementById('stationDropdown').value;
+        const filtered = finalData.filter(r => r['STATION FROM'] === selStation);
+        let groups = {}, gT = { wagons: 0, weight: 0, rrs: new Set() };
+
+        filtered.forEach(r => {
+            let cmdt = (r['CMDT CODE-CODE'] || 'N/A').split('-').slice(1).join('-').trim();
+            let key = cmdt + '-' + r['WAGON TYPE'];
+            if(!groups[key]) groups[key] = { cmdt, wgn: r['WAGON TYPE'], wagons: 0, weight: 0, rrs: new Set() };
+            
+            let w = parseInt(r['8-WHLR'] || 0);
+            let wt = parseFloat(r['WEIGHT CHRG'] || 0);
+            groups[key].wagons += w; groups[key].weight += wt; groups[key].rrs.add(r['RR NUMBER']);
+            gT.wagons += w; gT.weight += wt;
+        });
+
+        let html = `<h3 style="text-align:center;">A STATEMENT SHOWING SN-105 FOR ${selStation}</h3><table><tr><th>Commodity</th><th>Wagon Type</th><th>WGN.</th><th>Weight Chrg</th><th>No. of RRs</th><th>Avg. Weight</th><th>Remarks</th></tr>`;
+        Object.values(groups).forEach(g => {
+            html += `<tr><td class="commodity-cell">${g.cmdt}</td><td>${g.wgn}</td><td>${format(g.wagons)}</td><td>${format(g.weight, true)}</td><td>${g.rrs.size}</td><td>${format(g.weight/g.wagons || 0, true)}</td><td>-</td></tr>`;
+        });
+        html += `<tr class="total-row"><td>TOTAL</td><td>-</td><td>${format(gT.wagons)}</td><td>${format(gT.weight, true)}</td><td>-</td><td>-</td><td>-</td></tr></table>`;
+        document.getElementById('reportArea').innerHTML = html;
+    }
+
+    function displayAPReport() {
+        const selStation = document.getElementById('stationDropdown').value;
+        const filtered = finalData.filter(r => r['STATION FROM'] === selStation);
+        let groups = {}, gT = { rrs: new Set(), wagons: 0, weight: 0, basic: 0, gst: 0, total: 0 };
+
+        filtered.forEach(r => {
+            let cmdt = (r['CMDT CODE-CODE'] || 'N/A').split('-').slice(1).join('-').trim();
+            if (!groups[cmdt]) groups[cmdt] = { rrs: new Set(), wagons: 0, weight: 0, basic: 0, gst: 0, total: 0 };
+            
+            let wgn = parseInt(r['8-WHLR'] || 0), wt = parseFloat(r['WEIGHT CHRG'] || 0), basic = parseFloat(r['TOTAL FRGT'] || 0), gst = parseFloat(r['GST DETAILS TOTL GST'] || 0), tot = parseFloat(r['FINAL FRGT (incl.SrvcTax/GST)'] || 0);
+            
+            groups[cmdt].rrs.add(r['RR NUMBER']); groups[cmdt].wagons += wgn; groups[cmdt].weight += wt; groups[cmdt].basic += basic; groups[cmdt].gst += gst; groups[cmdt].total += tot;
+            gT.rrs.add(r['RR NUMBER']); gT.wagons += wgn; gT.weight += wt; gT.basic += basic; gT.gst += gst; gT.total += tot;
+        });
+
+        let html = `<h3 style="text-align:center;">A STATEMENT SHOWING A.P. (PERIODICAL) FOR ${selStation}</h3><table><tr><th>Commodity</th><th>No. of RRs</th><th>No. of Wagons</th><th>Weight (Tonnes)</th><th>Basic Frgt</th><th>G.S.T.</th><th>Total Frgt</th></tr>`;
+        Object.keys(groups).forEach(c => {
+            let g = groups[c];
+            html += `<tr><td class="commodity-cell">${c}</td><td>${g.rrs.size}</td><td>${format(g.wagons)}</td><td>${format(g.weight, true)}</td><td>${format(g.basic)}</td><td>${format(g.gst)}</td><td>${format(g.total)}</td></tr>`;
+        });
+        html += `<tr class="total-row"><td>TOTAL</td><td>-</td><td>${format(gT.wagons)}</td><td>${format(gT.weight, true)}</td><td>${format(gT.basic)}</td><td>${format(gT.gst)}</td><td>${format(gT.total)}</td></tr></table>`;
+        document.getElementById('reportArea').innerHTML = html;
+    }
+</script>
+</body>
+</html>
